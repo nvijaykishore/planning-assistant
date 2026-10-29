@@ -1,0 +1,11 @@
+node_modules
+.next
+.env
+.env*.local
+demo-out
+test-results
+playwright-report
+*.webm
+*.mp4
+tsconfig.tsbuildinfo
+.vercel

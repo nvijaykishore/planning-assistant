@@ -110,10 +110,8 @@ export function publicError(error: unknown): { status: number; message: string }
     return { status: 504, message: "Grok took too long. Your brief is still here — try once more." };
   }
   if (message === "rejected_key") {
-    const shape =
-      error instanceof Error && typeof (error as ShapedError).shape === "string"
-        ? (error as ShapedError).shape
-        : "an unrecognized value";
+    const rawShape = error instanceof Error ? (error as ShapedError).shape : undefined;
+    const shape = rawShape ?? "an unrecognized value";
     return { status: 502, message: rejectedKeyMessage(shape) };
   }
   const lower = message.toLowerCase();

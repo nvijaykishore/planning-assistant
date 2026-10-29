@@ -1,4 +1,5 @@
 import { scaleToTarget } from "./budget";
+import { PlanShapeError } from "./failures";
 import { clipBlock, dollars, sameText, uid } from "./format";
 import type {
   BudgetLine,
@@ -16,7 +17,7 @@ import type { Brief } from "./types";
 const IDEA_KINDS: IdeaKind[] = ["theme", "menu", "activity", "decor", "favor", "moment"];
 
 export function readRawPlan(input: unknown): RawPlan {
-  if (!input || typeof input !== "object") throw new Error("The plan came back empty.");
+  if (!input || typeof input !== "object") throw new PlanShapeError("The plan came back empty.");
   const body = input as Record<string, unknown>;
   const budgetLines = asArray(body.budgetLines)
     .map((line) => {
@@ -79,13 +80,13 @@ export function readRawPlan(input: unknown): RawPlan {
     .filter((item): item is RawPlan["ideas"][number] => Boolean(item))
     .slice(0, 8);
 
-  if (budgetLines.length < 3) throw new Error("The budget came back too thin to use.");
-  if (timeline.length < 3) throw new Error("The timeline came back too thin to use.");
-  if (vendors.length < 2) throw new Error("The vendor list came back too thin to use.");
-  if (ideas.length < 2) throw new Error("The ideas came back too thin to use.");
+  if (budgetLines.length < 3) throw new PlanShapeError("The budget came back too thin to use.");
+  if (timeline.length < 3) throw new PlanShapeError("The timeline came back too thin to use.");
+  if (vendors.length < 2) throw new PlanShapeError("The vendor list came back too thin to use.");
+  if (ideas.length < 2) throw new PlanShapeError("The ideas came back too thin to use.");
 
   const concept = clipBlock(body.concept, 1600);
-  if (concept.length < 40) throw new Error("The concept came back empty.");
+  if (concept.length < 40) throw new PlanShapeError("The concept came back empty.");
 
   return {
     headline: clipBlock(body.headline, 140) || "Untitled plan",
@@ -96,6 +97,20 @@ export function readRawPlan(input: unknown): RawPlan {
     timeline,
     vendors,
     ideas,
+  };
+}
+
+export function readRevision(
+  input: unknown,
+  fallbackBudget: number,
+): { reply: string; budgetTotal: number; plan: RawPlan } {
+  const plan = readRawPlan(input);
+  const body = asRecord(input);
+  const parsedTotal = Number(body.budgetTotal);
+  return {
+    reply: clipBlock(body.reply, 800) || "The plan is updated.",
+    budgetTotal: Number.isFinite(parsedTotal) ? parsedTotal : fallbackBudget,
+    plan,
   };
 }
 

@@ -1,8 +1,9 @@
 import OpenAI from "openai";
+import { UNFINISHED, VisibleFailure } from "./failures";
 
 const MODEL = "grok-4.7";
-
-type ShapedError = Error & { shape?: string };
+const SLOW = "Grok took too long. Your brief is still here — try once more.";
+const MISSING_KEY = "This deployment has no XAI_API_KEY set, so Daybook cannot call Grok yet.";
 
 function stripQuotes(value: string): string {
   if (
@@ -38,18 +39,20 @@ export function rejectedKeyMessage(shape: string): string {
   return `xAI rejected the API key. The server is sending ${shape}. Use the full key from the xAI console. It starts with xai-. Save that value alone as XAI_API_KEY, then redeploy.`;
 }
 
-function rejectedKey(key: string): ShapedError {
-  const error = new Error("rejected_key") as ShapedError;
-  error.shape = describeKey(key);
-  return error;
+function statusOf(error: unknown): number | undefined {
+  if (typeof error !== "object" || error === null || !("status" in error)) return undefined;
+  return typeof error.status === "number" ? error.status : undefined;
 }
 
 function isRejectedKey(error: unknown): boolean {
+  if (statusOf(error) === 401) return true;
   const message = error instanceof Error ? error.message.toLowerCase() : "";
-  const status =
-    typeof error === "object" && error && "status" in error ? Number((error as { status: unknown }).status) : 0;
-  if (status === 401) return true;
   return message.includes("incorrect api key") || (message.includes("invalid") && message.includes("api key"));
+}
+
+function isTimeout(error: unknown): boolean {
+  const message = error instanceof Error ? error.message.toLowerCase() : "";
+  return message.includes("timed out") || message.includes("timeout");
 }
 
 export async function completeJson(
@@ -59,7 +62,7 @@ export async function completeJson(
   prompt: string,
 ): Promise<unknown> {
   const apiKey = normalizeApiKey(process.env.XAI_API_KEY);
-  if (!apiKey) throw new Error("missing_key");
+  if (!apiKey) throw new VisibleFailure(500, MISSING_KEY);
 
   const client = new OpenAI({
     apiKey,
@@ -67,9 +70,8 @@ export async function completeJson(
     timeout: 55_000,
   });
 
-  let response;
   try {
-    response = await client.responses.create({
+    const response = await client.responses.create({
       model: MODEL,
       store: false,
       reasoning: { effort: "low" },
@@ -87,49 +89,18 @@ export async function completeJson(
         },
       },
     });
+    if (response.status === "incomplete") throw new VisibleFailure(504, SLOW);
+    const text = response.output_text?.trim();
+    if (!text) throw new VisibleFailure(502, UNFINISHED);
+    return JSON.parse(text) as unknown;
   } catch (error) {
-    if (isRejectedKey(error)) throw rejectedKey(apiKey);
-    throw error;
+    if (error instanceof VisibleFailure) throw error;
+    if (isRejectedKey(error)) {
+      console.error("key rejected", describeKey(apiKey));
+      throw new VisibleFailure(502, rejectedKeyMessage(describeKey(apiKey)));
+    }
+    if (isTimeout(error)) throw new VisibleFailure(504, SLOW);
+    console.error("model call failed", error instanceof Error ? error.name : "unknown");
+    throw new VisibleFailure(502, UNFINISHED);
   }
-
-  if (response.status === "incomplete") {
-    throw new Error("timeout");
-  }
-
-  const text = response.output_text?.trim();
-  if (!text) throw new Error("empty");
-  return JSON.parse(text);
-}
-
-export function publicError(error: unknown): { status: number; message: string } {
-  const message = error instanceof Error ? error.message : "";
-  if (message === "missing_key") {
-    return { status: 500, message: "This deployment has no XAI_API_KEY set, so Daybook cannot call Grok yet." };
-  }
-  if (message === "timeout") {
-    return { status: 504, message: "Grok took too long. Your brief is still here — try once more." };
-  }
-  if (message === "rejected_key") {
-    const rawShape = error instanceof Error ? (error as ShapedError).shape : undefined;
-    const shape = rawShape ?? "an unrecognized value";
-    return { status: 502, message: rejectedKeyMessage(shape) };
-  }
-  const lower = message.toLowerCase();
-  if (lower.includes("incorrect api key") || (lower.includes("invalid") && lower.includes("api key")) || message.includes("401")) {
-    return { status: 502, message: rejectedKeyMessage("an unrecognized value") };
-  }
-  if (lower.includes("timed out") || lower.includes("timeout")) {
-    return { status: 504, message: "Grok took too long. Your brief is still here — try once more." };
-  }
-  if (
-    message.startsWith("The budget") ||
-    message.startsWith("The timeline") ||
-    message.startsWith("The vendor") ||
-    message.startsWith("The ideas") ||
-    message.startsWith("The concept") ||
-    message.startsWith("The plan")
-  ) {
-    return { status: 502, message: `${message} Try once more.` };
-  }
-  return { status: 502, message: "Grok could not finish that. Your work is still here — try once more." };
 }

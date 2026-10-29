@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { envelope } from "./budget";
-import { applyRevision, materialize, readRawPlan } from "./normalize";
+import { applyRevision, materialize, readRawPlan, readRevision } from "./normalize";
 import type { Brief, Plan, RawPlan } from "./types";
 
 const brief: Brief = {
@@ -61,6 +61,13 @@ function raw(overrides: Partial<RawPlan> = {}): RawPlan {
 
 test("readRawPlan rejects a thin budget", () => {
   assert.throws(() => readRawPlan(raw({ budgetLines: [] })), /budget/i);
+});
+
+test("readRevision keeps the reply and falls back when the new total is missing", () => {
+  const revision = readRevision({ ...raw(), reply: "Kept the cake.", budgetTotal: "nope" }, 1000);
+  assert.equal(revision.reply, "Kept the cake.");
+  assert.equal(revision.budgetTotal, 1000);
+  assert.equal(revision.plan.headline, "Dig day");
 });
 
 test("materialize makes the lines match the brief and keeps money already spent", () => {

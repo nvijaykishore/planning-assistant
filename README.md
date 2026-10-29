@@ -4,6 +4,14 @@ Daybook is a planning studio for weddings, birthdays, and community events.
 
 You write a brief. Grok (`grok-4.7` on the xAI API) writes a plan that belongs to that brief: a concept, a budget, a timeline, a vendor checklist, and a handful of ideas. Daybook then keeps the budget honest, and keeps your checkmarks.
 
+## Open it
+
+- Studio: https://planning-assistant-nvijaykishore-6553s-projects.vercel.app/
+- Source: https://github.com/nvijaykishore/planning-assistant
+- Walkthrough: https://files.catbox.moe/0wxyvw.mp4
+
+The studio serves the worked examples with no key. A new plan, or a revision, needs `XAI_API_KEY` on the server. The walkthrough is two minutes: a worked wedding, a generated birthday, and one revision.
+
 ## Principles
 
 - The budget is a sum, not a mood. Line items plus contingency equal the number you named. If the model misses, Daybook rescales the lines and shows the variance.

@@ -1,9 +1,15 @@
 import OpenAI from "openai";
-import { UNFINISHED, VisibleFailure } from "./failures";
 
 const MODEL = "grok-4.7";
 const SLOW = "Grok took too long. Your brief is still here — try once more.";
+const UNFINISHED = "Grok could not finish that. Your work is still here — try once more.";
 const MISSING_KEY = "This deployment has no XAI_API_KEY set, so Daybook cannot call Grok yet.";
+
+export type ModelResult = { ok: true; value: unknown } | { ok: false; status: number; message: string };
+
+function fail(status: number, message: string): ModelResult {
+  return { ok: false, status, message };
+}
 
 function stripQuotes(value: string): string {
   if (
@@ -60,9 +66,9 @@ export async function completeJson(
   schema: object,
   instructions: string,
   prompt: string,
-): Promise<unknown> {
+): Promise<ModelResult> {
   const apiKey = normalizeApiKey(process.env.XAI_API_KEY);
-  if (!apiKey) throw new VisibleFailure(500, MISSING_KEY);
+  if (!apiKey) return fail(500, MISSING_KEY);
 
   const client = new OpenAI({
     apiKey,
@@ -89,18 +95,17 @@ export async function completeJson(
         },
       },
     });
-    if (response.status === "incomplete") throw new VisibleFailure(504, SLOW);
+    if (response.status === "incomplete") return fail(504, SLOW);
     const text = response.output_text?.trim();
-    if (!text) throw new VisibleFailure(502, UNFINISHED);
-    return JSON.parse(text) as unknown;
+    if (!text) return fail(502, UNFINISHED);
+    return { ok: true, value: JSON.parse(text) as unknown };
   } catch (error) {
-    if (error instanceof VisibleFailure) throw error;
     if (isRejectedKey(error)) {
       console.error("key rejected", describeKey(apiKey));
-      throw new VisibleFailure(502, rejectedKeyMessage(describeKey(apiKey)));
+      return fail(502, rejectedKeyMessage(describeKey(apiKey)));
     }
-    if (isTimeout(error)) throw new VisibleFailure(504, SLOW);
+    if (isTimeout(error)) return fail(504, SLOW);
     console.error("model call failed", error instanceof Error ? error.name : "unknown");
-    throw new VisibleFailure(502, UNFINISHED);
+    return fail(502, UNFINISHED);
   }
 }

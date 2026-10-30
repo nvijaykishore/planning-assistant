@@ -1,6 +1,5 @@
 import { scaleToTarget } from "./budget";
-import { PlanShapeError } from "./failures";
-import { clipBlock, dollars, sameText, uid } from "./format";
+import { clipBlock, dollars, textKey, uid } from "./format";
 import type {
   BudgetLine,
   ChatMessage,
@@ -16,8 +15,13 @@ import type { Brief } from "./types";
 
 const IDEA_KINDS: IdeaKind[] = ["theme", "menu", "activity", "decor", "favor", "moment"];
 
+export function planRetry(error: unknown): string {
+  if (error instanceof Error && error.message) return `${error.message} Try once more.`;
+  return "Grok could not finish that. Your work is still here — try once more.";
+}
+
 export function readRawPlan(input: unknown): RawPlan {
-  if (!input || typeof input !== "object") throw new PlanShapeError("The plan came back empty.");
+  if (!input || typeof input !== "object") throw new Error("The plan came back empty.");
   const body = input as Record<string, unknown>;
   const budgetLines = asArray(body.budgetLines)
     .map((line) => {
@@ -80,13 +84,13 @@ export function readRawPlan(input: unknown): RawPlan {
     .filter((item): item is RawPlan["ideas"][number] => Boolean(item))
     .slice(0, 8);
 
-  if (budgetLines.length < 3) throw new PlanShapeError("The budget came back too thin to use.");
-  if (timeline.length < 3) throw new PlanShapeError("The timeline came back too thin to use.");
-  if (vendors.length < 2) throw new PlanShapeError("The vendor list came back too thin to use.");
-  if (ideas.length < 2) throw new PlanShapeError("The ideas came back too thin to use.");
+  if (budgetLines.length < 3) throw new Error("The budget came back too thin to use.");
+  if (timeline.length < 3) throw new Error("The timeline came back too thin to use.");
+  if (vendors.length < 2) throw new Error("The vendor list came back too thin to use.");
+  if (ideas.length < 2) throw new Error("The ideas came back too thin to use.");
 
   const concept = clipBlock(body.concept, 1600);
-  if (concept.length < 40) throw new PlanShapeError("The concept came back empty.");
+  if (concept.length < 40) throw new Error("The concept came back empty.");
 
   return {
     headline: clipBlock(body.headline, 140) || "Untitled plan",
@@ -115,8 +119,12 @@ export function readRevision(
 }
 
 export function materialize(brief: Brief, raw: RawPlan, previous?: Plan): Plan {
+  const priorBudget = indexBy(previous?.budgetLines, (line) => line.category);
+  const priorTimeline = indexBy(previous?.timeline, (item) => item.title);
+  const priorVendors = indexBy(previous?.vendors, (item) => item.category);
+  const priorIdeas = indexBy(previous?.ideas, (item) => item.title);
   const budgetLines = raw.budgetLines.map((line) => {
-    const prior = previous?.budgetLines.find((item) => sameText(item.category, line.category));
+    const prior = priorBudget.get(textKey(line.category));
     return {
       id: prior?.id ?? uid("bud"),
       category: line.category,
@@ -145,7 +153,7 @@ export function materialize(brief: Brief, raw: RawPlan, previous?: Plan): Plan {
     })),
     timeline: raw.timeline
       .map((item) => {
-        const prior = previous?.timeline.find((milestone) => sameText(milestone.title, item.title));
+        const prior = priorTimeline.get(textKey(item.title));
         return {
           id: prior?.id ?? uid("mile"),
           offsetDays: item.offsetDays,
@@ -157,7 +165,7 @@ export function materialize(brief: Brief, raw: RawPlan, previous?: Plan): Plan {
       })
       .sort((a, b) => b.offsetDays - a.offsetDays),
     vendors: raw.vendors.map((item) => {
-      const prior = previous?.vendors.find((vendor) => sameText(vendor.category, item.category));
+      const prior = priorVendors.get(textKey(item.category));
       return {
         id: prior?.id ?? uid("ven"),
         category: item.category,
@@ -169,7 +177,7 @@ export function materialize(brief: Brief, raw: RawPlan, previous?: Plan): Plan {
       } satisfies Vendor;
     }),
     ideas: raw.ideas.map((item) => {
-      const prior = previous?.ideas.find((idea) => sameText(idea.title, item.title));
+      const prior = priorIdeas.get(textKey(item.title));
       return {
         id: prior?.id ?? uid("idea"),
         kind: item.kind,
@@ -204,6 +212,16 @@ export function applyRevision(
 
 export function vendorStatuses(): VendorStatus[] {
   return ["not_started", "researching", "contacted", "booked", "skipped"];
+}
+
+function indexBy<T>(items: T[] | undefined, label: (item: T) => string): Map<string, T> {
+  const indexed = new Map<string, T>();
+  if (!items) return indexed;
+  for (const item of items) {
+    const key = textKey(label(item));
+    if (!indexed.has(key)) indexed.set(key, item);
+  }
+  return indexed;
 }
 
 function asArray(value: unknown): unknown[] {

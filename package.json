@@ -6,7 +6,7 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "test": "tsx --test lib/budget.test.ts lib/normalize.test.ts lib/key.test.ts lib/failures.test.ts"
+    "test": "tsx --test lib/budget.test.ts lib/normalize.test.ts lib/key.test.ts"
   },
   "dependencies": {
     "next": "^15.5.6",

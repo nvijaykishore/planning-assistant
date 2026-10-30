@@ -1,51 +1,47 @@
 import { parseBrief } from "../../../lib/brief";
-import { VisibleFailure } from "../../../lib/failures";
 import { clipBlock } from "../../../lib/format";
 import { completeJson } from "../../../lib/grok";
-import { readRevision } from "../../../lib/normalize";
+import { planRetry, readRevision } from "../../../lib/normalize";
 import { REFINE_INSTRUCTIONS, refinePrompt } from "../../../lib/prompt";
-import { jsonResult, readJson } from "../../../lib/respond";
 import { REFINE_SCHEMA } from "../../../lib/schema";
-import type { ChatMessage, Plan } from "../../../lib/types";
+import type { Plan } from "../../../lib/types";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
 
-function chatTail(value: unknown): ChatMessage[] {
-  if (!Array.isArray(value)) return [];
-  const messages: ChatMessage[] = [];
-  for (const item of value) {
-    if (!item || typeof item !== "object") continue;
-    if (!("role" in item) || !("content" in item)) continue;
-    if ((item.role === "user" || item.role === "assistant") && typeof item.content === "string") {
-      messages.push({ role: item.role, content: item.content });
-    }
+export async function POST(request: Request) {
+  let body: unknown;
+  try {
+    body = await request.json();
+  } catch {
+    return Response.json({ error: "That request was not readable." }, { status: 400 });
   }
-  return messages.slice(-6);
-}
 
-export function POST(request: Request) {
-  return jsonResult("refine failed", async () => {
-    const body = await readJson(request, "That request was not readable.");
-    if (!body || typeof body !== "object") throw new VisibleFailure(400, "That request was empty.");
+  if (!body || typeof body !== "object") {
+    return Response.json({ error: "That request was empty." }, { status: 400 });
+  }
+  const record = body as { message?: unknown; plan?: Plan };
+  const message = clipBlock(record.message, 1000);
+  if (message.length < 2) return Response.json({ error: "Say what you want changed." }, { status: 400 });
 
-    const record = body as { message?: unknown; plan?: Plan };
-    const message = clipBlock(record.message, 1000);
-    if (message.length < 2) throw new VisibleFailure(400, "Say what you want changed.");
+  const parsed = parseBrief(record.plan?.brief);
+  if (!parsed.ok) return Response.json({ error: parsed.error }, { status: 400 });
+  if (!record.plan || !Array.isArray(record.plan.budgetLines)) {
+    return Response.json({ error: "The plan to revise was missing." }, { status: 400 });
+  }
 
-    const parsed = parseBrief(record.plan?.brief);
-    if (!parsed.ok) throw new VisibleFailure(400, parsed.error);
-    if (!record.plan || !Array.isArray(record.plan.budgetLines)) {
-      throw new VisibleFailure(400, "The plan to revise was missing.");
-    }
+  const plan: Plan = {
+    ...record.plan,
+    brief: parsed.brief,
+    chat: Array.isArray(record.plan.chat) ? record.plan.chat.slice(-6) : [],
+  };
+  const outcome = await completeJson("daybook_revision", REFINE_SCHEMA, REFINE_INSTRUCTIONS, refinePrompt(plan, message));
+  if (!outcome.ok) return Response.json({ error: outcome.message }, { status: outcome.status });
 
-    const plan: Plan = {
-      ...record.plan,
-      brief: parsed.brief,
-      chat: chatTail(record.plan.chat),
-    };
-    const json = await completeJson("daybook_revision", REFINE_SCHEMA, REFINE_INSTRUCTIONS, refinePrompt(plan, message));
-    const revision = readRevision(json, parsed.brief.budget);
-    return { reply: revision.reply, budgetTotal: revision.budgetTotal, plan: revision.plan };
-  });
+  try {
+    const revision = readRevision(outcome.value, parsed.brief.budget);
+    return Response.json({ reply: revision.reply, budgetTotal: revision.budgetTotal, plan: revision.plan });
+  } catch (error) {
+    return Response.json({ error: planRetry(error) }, { status: 502 });
+  }
 }

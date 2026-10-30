@@ -20,8 +20,8 @@ export function uid(prefix: string): string {
   return `${prefix}_${id}`;
 }
 
-export function sameText(a: string, b: string): boolean {
-  return a.trim().toLowerCase().replace(/\s+/g, " ") === b.trim().toLowerCase().replace(/\s+/g, " ");
+export function textKey(value: string): string {
+  return value.trim().toLowerCase().replace(/\s+/g, " ");
 }
 
 export function money(amount: number, currency: string): string {
